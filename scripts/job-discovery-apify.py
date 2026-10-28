@@ -202,7 +202,7 @@ def location_ok(item):
     return any(tl in loc for tl in TARGET_LOCATIONS)
 
 def is_recent_48h(item):
-    pub = item.get("postedAt") or item.get("publishedAt") or item.get("datePosted")
+    pub = item.get("postedAt") or item.get("publishedAt") or item.get("datePosted") or item.get("postedDate")
     if not pub:
         return True
     try:
@@ -226,11 +226,11 @@ def process(items, network):
         if not is_pm_role(title):
             continue
         company = job.get("companyName") or ""
-        desc    = job.get("descriptionText") or ""
-        url     = job.get("link") or job.get("applyUrl") or ""
+        desc    = job.get("descriptionText") or job.get("description") or ""
+        url     = job.get("link") or job.get("jobUrl") or job.get("applyUrl") or ""
         loc     = job.get("location") or ""
-        pub     = job.get("postedAt") or job.get("publishedAt")
-        co_ind  = job.get("companyIndustry") or ""
+        pub     = job.get("postedAt") or job.get("publishedAt") or job.get("postedDate")
+        co_ind  = job.get("companyIndustry") or ", ".join(job.get("industries") or [])
 
         if not title or not company:
             continue
@@ -504,22 +504,21 @@ def main():
 
     client = ApifyClient(APIFY_TOKEN)
 
-    start_urls = [
-        {"url": f"https://www.linkedin.com/jobs/search/?keywords={urllib.parse.quote(t)}&location=United%20States&f_TPR=r259200"}
-        for t in TITLES
-    ]
+    # One search per title: the actor takes a single keyword per run
+    items = []
+    for t in TITLES:
+        run_input = {
+            "keyword": t,
+            "location": "United States",
+            "timeRange": "past-week",
+            "maxJobs": 25,
+        }
 
-    run_input = {
-        "startUrls": start_urls,
-        "maxItems": 50,
-        "scrapeCompany": True,
-        "scrapeJobDetails": True,
-    }
+        print(f"▶ Running actor via apify-client (.call) for {t}...")
+        run = client.actor("johnvc/linkedin-jobs-api").call(run_input=run_input)
 
-    print(f"▶ Running actor via apify-client (.call)...")
-    run = client.actor("openclaw/linkedin-jobs-scraper").call(run_input=run_input)
-
-    items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+        items += [i for i in client.dataset(run["defaultDatasetId"]).iterate_items()
+                  if not i.get("error_message")]
     print(f"  {len(items)} raw items from Apify")
 
     if not items:
